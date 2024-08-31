@@ -1,0 +1,70 @@
+//https://community.dynamics.com/blogs/post/?postid=42ff27ce-ca07-4b7f-a826-664740c2ec1d
+
+using System;
+using System.Net;
+using System.Net.Http;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using System.Threading.Tasks;
+using System.Net.Http.Headers;
+using Microsoft.IdentityModel.Clients.ActiveDirectory;
+
+namespace CRMConnectAzure
+{
+    class Program
+    {
+        private const string ClientId = "7a58c565-6748-42a2-5555-abcd9f2e18e3";
+        
+        //Azure Application Client Key / Secret
+        private const string ClientSecret = "m.99KxU-PBh-S4NEUBnNbaRRat.MG7_n04";
+
+        private const string TenantId = "7ffd1e73-c19f-8685-b4cf-46302a8fca78";
+
+        //Resource / CRM Url
+        private const string CrmURL = "https://mytechsolutions1.crm4.dynamics.com";
+
+        //Guid is your Azure Active Directory Tenant Id
+        
+        private const string Authority = "https://login.microsoftonline.com/"+ TenantId +"/oauth2/token";
+
+        private static AuthenticationResult _authResult;
+
+        static void Main(string[] args)
+        {
+            AuthenticationContext authContext = new AuthenticationContext(Authority);
+            ClientCredential credentials = new ClientCredential(ClientId, ClientSecret);
+            _authResult = authContext.AcquireToken(CrmURL, credentials);
+            Task.WaitAll(Task.Run(async () => await GetAccounts()));
+            Console.ReadLine();
+        }
+
+        private static async Task GetAccounts()
+        {
+            using (HttpClient httpClient = new HttpClient())
+            {
+                httpClient.BaseAddress = new Uri(CrmURL);
+                httpClient.Timeout = new TimeSpan(0, 2, 0);
+                httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
+                httpClient.DefaultRequestHeaders.Add("OData-Version", "4.0");
+                httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _authResult.AccessToken);
+                //Add this line for TLS complaience
+                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
+                var retrieveResponseTest = httpClient.GetAsync("/api/data/v9.1/accounts?$select=accountid,name,_primarycontactid_value&$filter=name ne null&$top=15").Result;
+                if (retrieveResponseTest.IsSuccessStatusCode)
+                {
+                    var jRetrieveResponse = JObject.Parse(retrieveResponseTest.Content.ReadAsStringAsync().Result);
+                    dynamic collAccounts = JsonConvert.DeserializeObject(jRetrieveResponse.ToString());
+                    foreach (var data in collAccounts.value)
+                    {
+                        Console.WriteLine("Account Name – " + data.name.Value + " - Guid: " + data.accountid.Value);
+                    }
+                }
+                else
+                {
+                    return;
+                }                    
+            }
+        }
+    }
+}
